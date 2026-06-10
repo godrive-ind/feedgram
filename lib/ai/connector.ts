@@ -506,6 +506,12 @@ export class DefaultAIServiceConnector implements AIServiceConnector {
 export interface AdapterEndpointConfig {
   apiKey: string;
   baseUrl: string;
+  /**
+   * Optional model identifier (e.g. an OpenRouter model slug like
+   * `openai/gpt-4o-mini`). When empty/absent the adapter falls back to
+   * {@link OPENROUTER_DEFAULT_MODEL}.
+   */
+  model?: string;
 }
 
 /** Read the three adapter configs from `process.env`. Server-side only. */
@@ -521,10 +527,12 @@ export function readAdapterConfigFromEnv(
     llm: {
       apiKey: env.LLM_API_KEY ?? "",
       baseUrl: env.LLM_API_BASE_URL ?? "",
+      model: env.LLM_MODEL,
     },
     imageGen: {
       apiKey: env.IMAGE_GEN_API_KEY ?? "",
       baseUrl: env.IMAGE_GEN_API_BASE_URL ?? "",
+      model: env.IMAGE_GEN_MODEL,
     },
     backgroundRemoval: {
       apiKey: env.BACKGROUND_REMOVAL_API_KEY ?? "",
@@ -535,6 +543,7 @@ export function readAdapterConfigFromEnv(
     evaluator: {
       apiKey: env.QUALITY_EVALUATOR_API_KEY ?? "",
       baseUrl: env.QUALITY_EVALUATOR_API_BASE_URL ?? "",
+      model: env.QUALITY_EVALUATOR_MODEL,
     },
   };
 }
@@ -569,50 +578,268 @@ function assertConfigured(cfg: AdapterEndpointConfig, vendor: string): void {
   }
 }
 
-/** HTTP-backed LLM adapter (vendor-agnostic placeholder). Req 3.1 */
+// ---------------------------------------------------------------------------
+// OpenRouter (OpenAI-compatible) chat helper
+// ---------------------------------------------------------------------------
+
+/** Default OpenRouter model used when none is configured via env. */
+export const OPENROUTER_DEFAULT_MODEL = "openai/gpt-4o-mini";
+
+/** A single chat message sent to the OpenRouter chat-completions endpoint. */
+interface ChatMessage {
+  role: "system" | "user";
+  content: string;
+}
+
+/**
+ * Call an OpenAI-compatible chat-completions endpoint (OpenRouter) and return
+ * the assistant message content as a string. Requests strict JSON output via
+ * `response_format`. Throws on non-2xx or an empty response so the connector's
+ * `callWithRetry` can retry / surface a labeled step failure.
+ */
+async function openRouterChat(
+  cfg: AdapterEndpointConfig,
+  messages: ChatMessage[],
+): Promise<string> {
+  const model = cfg.model && cfg.model.length > 0 ? cfg.model : OPENROUTER_DEFAULT_MODEL;
+  const endpoint = `${cfg.baseUrl.replace(/\/+$/, "")}/chat/completions`;
+
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${cfg.apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model,
+      messages,
+      response_format: { type: "json_object" },
+    }),
+  });
+
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    throw new Error(`OpenRouter HTTP ${response.status}: ${detail.slice(0, 300)}`);
+  }
+
+  const data = (await response.json()) as {
+    choices?: { message?: { content?: string } }[];
+  };
+  const content = data.choices?.[0]?.message?.content;
+  if (typeof content !== "string" || content.trim().length === 0) {
+    throw new Error("OpenRouter: respons kosong / tanpa konten.");
+  }
+  return content;
+}
+
+/**
+ * Parse a JSON object out of a model response, tolerating ```json code fences
+ * and leading/trailing prose by slicing to the outermost braces.
+ */
+function extractJsonObject(content: string): Record<string, unknown> {
+  let text = content.trim();
+  const fence = /^```(?:json)?\s*([\s\S]*?)\s*```$/i.exec(text);
+  if (fence) text = fence[1].trim();
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start !== -1 && end !== -1 && end > start) {
+    text = text.slice(start, end + 1);
+  }
+  return JSON.parse(text) as Record<string, unknown>;
+}
+
+/** HTTP-backed LLM adapter (OpenRouter, OpenAI-compatible). Req 3.1 */
 export class HttpLLMAdapter implements LLMAdapter {
   constructor(private readonly cfg: AdapterEndpointConfig) {}
 
-  async generateCopy(_req: CopyRequest): Promise<CopyContent> {
+  async generateCopy(req: CopyRequest): Promise<CopyContent> {
     assertConfigured(this.cfg, "LLM provider");
-    // Concrete request/response mapping is added with the chosen vendor.
-    throw new Error("HttpLLMAdapter.generateCopy belum diimplementasikan");
-  }
-}
 
-/** HTTP-backed image-generation adapter (vendor-agnostic placeholder). Req 3.2 */
-export class HttpImageGenAdapter implements ImageGenAdapter {
-  constructor(private readonly cfg: AdapterEndpointConfig) {}
+    // Use the layered System_Prompt when Professional_Mode supplied one,
+    // otherwise a sensible default copywriter persona.
+    const system =
+      req.systemPrompt && req.systemPrompt.length > 0
+        ? req.systemPrompt
+        : "You are a senior social-media copywriter. Always respond with strict JSON only.";
 
-  async generateImage(_req: ImageRequest): Promise<ImageAsset> {
-    assertConfigured(this.cfg, "Image generation provider");
-    throw new Error("HttpImageGenAdapter.generateImage belum diimplementasikan");
-  }
-}
+    const user = [
+      "Buat naskah (copy) untuk satu desain feed berdasarkan brief berikut.",
+      `Brand: ${req.brandDna.brandName}`,
+      req.brandDna.tagline ? `Tagline: ${req.brandDna.tagline}` : "",
+      `Gaya visual: ${req.brandDna.visualStyle}`,
+      `Tone: ${req.tone}`,
+      `Tujuan konten: ${req.contentGoal}`,
+      req.brief.mainMessage ? `Pesan utama: ${req.brief.mainMessage}` : "",
+      "",
+      'Balas HANYA JSON: {"headline": string, "subHeadline": string, "body": string, "cta": string}.',
+      "headline singkat & kuat; cta berupa ajakan singkat.",
+    ]
+      .filter(Boolean)
+      .join("\n");
 
-/** HTTP-backed background-removal adapter (vendor-agnostic placeholder). Req 3.4 */
-export class HttpBackgroundRemovalAdapter implements BackgroundRemovalAdapter {
-  constructor(private readonly cfg: AdapterEndpointConfig) {}
+    const content = await openRouterChat(this.cfg, [
+      { role: "system", content: system },
+      { role: "user", content: user },
+    ]);
+    const parsed = extractJsonObject(content);
 
-  async removeBackground(_asset: UploadedFile): Promise<ImageAsset> {
-    assertConfigured(this.cfg, "Background removal provider");
-    throw new Error(
-      "HttpBackgroundRemovalAdapter.removeBackground belum diimplementasikan",
-    );
+    const asString = (v: unknown): string | undefined =>
+      typeof v === "string" && v.trim().length > 0 ? v.trim() : undefined;
+
+    return {
+      headline: asString(parsed.headline) ?? req.brandDna.brandName,
+      subHeadline: asString(parsed.subHeadline),
+      body: asString(parsed.body),
+      cta: asString(parsed.cta) ?? "Pelajari Lebih Lanjut",
+      // Alignment is also re-forced by the step-3 transform (Property 6).
+      alignedGoal: req.contentGoal,
+      alignedTone: req.tone,
+    };
   }
 }
 
 /**
- * HTTP-backed Quality_Evaluator adapter (vendor-agnostic placeholder). Operates
- * as a SEPARATE AI role from copy/image and reads server-side env creds only
- * (Req 5.5, 5.6). Req 5.1
+ * HTTP-backed image-generation adapter.
+ *
+ * NOTE: OpenRouter does not expose a standard image-generation REST endpoint,
+ * so this adapter returns a deterministic placeholder SVG (colored by the
+ * prompt seed) at the requested format dimensions. This keeps the 6-step
+ * pipeline complete end-to-end. Swap this class for a real image provider
+ * (e.g. Flux/Replicate/Stability) when one is available — the connector and
+ * pipeline do not change because adapters are pluggable. Req 3.2
+ */
+export class HttpImageGenAdapter implements ImageGenAdapter {
+  constructor(private readonly cfg: AdapterEndpointConfig) {}
+
+  async generateImage(req: ImageRequest): Promise<ImageAsset> {
+    const { width, height } = req.format;
+    const seed = req.imagePrompt.seed ?? 0;
+    const hue = ((seed % 360) + 360) % 360;
+    const svg =
+      `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">` +
+      `<rect width="100%" height="100%" fill="hsl(${hue},70%,55%)"/></svg>`;
+    return {
+      id: `img_${seed}`,
+      url: `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`,
+      width,
+      height,
+    };
+  }
+}
+
+/**
+ * HTTP-backed background-removal adapter.
+ *
+ * NOTE: no background-removal provider is wired yet; this returns a transparent
+ * placeholder so the upload flow does not fail. Replace with a real provider
+ * (e.g. Remove.bg) when available. Req 3.4
+ */
+export class HttpBackgroundRemovalAdapter implements BackgroundRemovalAdapter {
+  constructor(private readonly cfg: AdapterEndpointConfig) {}
+
+  async removeBackground(asset: UploadedFile): Promise<ImageAsset> {
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512"></svg>`;
+    return {
+      id: `bg_${asset.name}`,
+      url: `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`,
+      width: 512,
+      height: 512,
+    };
+  }
+}
+
+/**
+ * HTTP-backed Quality_Evaluator adapter (OpenRouter, OpenAI-compatible).
+ * Operates as a SEPARATE "Creative Director" AI role from copy/image and reads
+ * server-side env creds only (Req 5.5, 5.6). Scores each requested criterion
+ * 1–10, computes a purpose-weighted total, and returns a critique + detected
+ * Negative_Patterns. Req 5.1, 5.2, 5.3, 10.4
  */
 export class HttpQualityEvaluatorAdapter implements QualityEvaluatorAdapter {
   constructor(private readonly cfg: AdapterEndpointConfig) {}
 
-  async evaluate(_req: QualityEvaluationRequest): Promise<QualityReport> {
+  async evaluate(req: QualityEvaluationRequest): Promise<QualityReport> {
     assertConfigured(this.cfg, "Quality evaluator provider");
-    throw new Error("HttpQualityEvaluatorAdapter.evaluate belum diimplementasikan");
+
+    const criteriaList = req.criteria
+      .map((c) => `${c.name} (ambang ${c.threshold})`)
+      .join(", ");
+
+    const system =
+      "You are a senior art director acting as a strict design Quality Evaluator. Respond ONLY with strict JSON.";
+    const user = [
+      "Nilai variasi desain berikut pada skala 1-10 (bilangan bulat) untuk tiap kriteria.",
+      `Kriteria: ${criteriaList}.`,
+      `Headline: ${req.variation.copy.headline}`,
+      `CTA: ${req.variation.copy.cta}`,
+      `Brand: ${req.variation.brandDna.brandName}; gaya: ${req.variation.brandDna.visualStyle}.`,
+      `Tujuan utama: ${req.briefAnalysis.primaryGoal}; pesan inti: ${req.briefAnalysis.coreMessage}.`,
+      "",
+      'Balas HANYA JSON: {"scores":[{"criterion":"<nama>","score":<1-10>}],"critique":"<kalimat>","detectedNegativePatterns":["..."]}',
+      "Sertakan SATU skor untuk SETIAP kriteria, pakai nama kriteria persis seperti di atas.",
+    ].join("\n");
+
+    const content = await openRouterChat(this.cfg, [
+      { role: "system", content: system },
+      { role: "user", content: user },
+    ]);
+    const parsed = extractJsonObject(content) as {
+      scores?: { criterion?: string; score?: number }[];
+      critique?: string;
+      detectedNegativePatterns?: string[];
+    };
+
+    // Index returned scores by criterion name.
+    const scoreByName = new Map<string, number>();
+    for (const s of parsed.scores ?? []) {
+      if (typeof s.criterion === "string" && typeof s.score === "number") {
+        scoreByName.set(s.criterion, s.score);
+      }
+    }
+
+    // One clamped integer score (1..10) per REQUESTED criterion; default 5 when
+    // the model omitted one so a report always covers every criterion.
+    const scores: QualityScore[] = req.criteria.map((c) => {
+      const raw = scoreByName.get(c.name);
+      const n =
+        typeof raw === "number" && Number.isFinite(raw) ? Math.round(raw) : 5;
+      return { criterion: c.name, score: Math.min(10, Math.max(1, n)) };
+    });
+
+    // Purpose-weighted total on the 1..10 scale (mean fallback).
+    let weighted = 0;
+    let weightSum = 0;
+    for (const { criterion, score } of scores) {
+      const w = req.decisionWeights.weights[criterion] ?? 0;
+      weighted += score * w;
+      weightSum += w;
+    }
+    const mean =
+      scores.reduce((acc, s) => acc + s.score, 0) / (scores.length || 1);
+    let weightedTotal = weightSum > 0 ? weighted / weightSum : mean;
+    weightedTotal = Math.min(10, Math.max(1, weightedTotal));
+
+    const critique =
+      typeof parsed.critique === "string" && parsed.critique.trim().length > 0
+        ? parsed.critique.trim()
+        : "Tidak ada kritik spesifik.";
+    const detectedNegativePatterns = Array.isArray(
+      parsed.detectedNegativePatterns,
+    )
+      ? parsed.detectedNegativePatterns.filter(
+          (p): p is string => typeof p === "string",
+        )
+      : [];
+
+    return {
+      variationId: req.variation.id,
+      scores,
+      weightedTotal,
+      // Indicative only; the pure Quality_Gate makes the authoritative call.
+      decision: weightedTotal >= 7.0 ? "ACCEPTED" : "REJECTED",
+      critique,
+      detectedNegativePatterns,
+    };
   }
 }
 
