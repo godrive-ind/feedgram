@@ -1,0 +1,269 @@
+// Prisma schema for Feed Design Generator (task 7.1).
+//
+// Deployment target: Vercel + serverless PostgreSQL (Neon / Supabase / Vercel
+// Postgres). See design "Deployment di Vercel".
+//
+// Connection pooling (serverless):
+//   - `url`       -> POOLED endpoint (PgBouncer / HTTP driver). Used at runtime
+//                    from short-lived serverless functions so connections do not
+//                    exhaust the database. Points at DATABASE_URL.
+//   - `directUrl` -> DIRECT (non-pooled) endpoint used by `prisma migrate` /
+//                    `prisma db push`, which cannot run over PgBouncer in
+//                    transaction mode. Points at DIRECT_DATABASE_URL.
+//
+// Serverless driver adapter:
+//   For runtime, prefer a serverless driver adapter such as `@prisma/adapter-neon`
+//   (Neon) or the Postgres HTTP driver, constructed in `lib/db.ts` and passed to
+//   `new PrismaClient({ adapter })`. The `driverAdapters` preview feature is
+//   enabled below. The adapter package is OPTIONAL for this task — the schema and
+//   the application code compile and tests run without it being installed.
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["driverAdapters"]
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  // Optional direct (non-pooled) connection for migrations. Documented in
+  // .env.example. Falls back is handled by tooling; safe to leave set.
+  directUrl = env("DIRECT_DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+/// Subscription plan. Req 8.4, 8.5
+enum Plan {
+  Free
+  Pro
+}
+
+/// Async job lifecycle state. Mirrors `JobState` in lib/types.ts.
+enum JobState {
+  queued
+  running
+  done
+  failed
+}
+
+/// Per-step status within the 6-step pipeline. Mirrors `StepStatus`.
+enum StepStatus {
+  pending
+  running
+  done
+  failed
+}
+
+/// Batch lifecycle status. Mirrors `GenerationBatch.status`.
+enum BatchStatus {
+  running
+  done
+  failed
+  inconsistent
+}
+
+/// Lifecycle of a credit reservation backing the reserve -> commit/refund
+/// pattern. A "held" reservation has funds set aside; "committed" finalizes the
+/// deduction (Req 8.2); "refunded" returns the funds (Req 2.10).
+enum ReservationStatus {
+  held
+  committed
+  refunded
+}
+
+// ---------------------------------------------------------------------------
+// Core identity & monetisation
+// ---------------------------------------------------------------------------
+
+/// A user owns batches, credit, a plan, jobs, and reservations.
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  plan      Plan     @default(Free)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  credit               Credit?
+  briefs               DesignBrief[]
+  batches              GenerationBatch[]
+  jobs                 Job[]
+  reservations         Reservation[]
+  intelligenceMemories IntelligenceMemory[]
+}
+
+/// 1:1 credit balance for a user. Balance is a non-negative integer (Req 8.6).
+/// The stored balance represents AVAILABLE (unreserved) credits; held
+/// reservations are subtracted from it atomically inside a transaction.
+model Credit {
+  id      String @id @default(cuid())
+  userId  String @unique
+  balance Int    @default(0)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+/// A held/committed/refunded reservation of credits. Backs the atomic
+/// reserve -> commit/refund pattern (Req 8.2, 8.6, 2.10).
+model Reservation {
+  id        String            @id @default(cuid())
+  userId    String
+  amount    Int
+  status    ReservationStatus @default(held)
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  job  Job?
+
+  @@index([userId])
+  @@index([status])
+}
+
+// ---------------------------------------------------------------------------
+// Brief, batch, variation (ER diagram)
+// ---------------------------------------------------------------------------
+
+/// The design brief associated with a batch. The structured brief input is
+/// stored as JSON (`input`) mirroring `DesignBriefInput`; denormalized columns
+/// kept for querying/validation.
+model DesignBrief {
+  id             String   @id @default(cuid())
+  userId         String
+  brandName      String   @db.VarChar(50)
+  tagline        String?  @db.VarChar(100)
+  mainMessage    String?  @db.VarChar(500)
+  contentGoal    String
+  visualStyle    String
+  tone           String
+  outputFormat   Json
+  variationCount Int
+  accentPalette  String[]
+  input          Json
+  createdAt      DateTime @default(now())
+
+  user    User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  batches GenerationBatch[]
+
+  @@index([userId])
+}
+
+/// A batch of variations generated from one brief. Req 2.8
+model GenerationBatch {
+  id        String      @id @default(cuid())
+  userId    String
+  briefId   String
+  status    BatchStatus @default(running)
+  createdAt DateTime    @default(now())
+
+  // Intelligence layer artefacts (Design Intelligence System). Nullable &
+  // non-breaking: populated only when Professional_Mode is active (Req 4.4).
+  briefAnalysis  Json?
+  visualStrategy Json?
+
+  user       User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  brief      DesignBrief       @relation(fields: [briefId], references: [id], onDelete: Cascade)
+  variations DesignVariation[]
+  job        Job?
+
+  @@index([userId])
+  @@index([briefId])
+  @@index([userId, createdAt])
+}
+
+/// A single design variation within a batch. Brand DNA / Design System / copy /
+/// layout are stored as JSON to mirror the in-memory data models; they are
+/// identical across variations in a batch by construction (Req 5.x).
+model DesignVariation {
+  id             String @id @default(cuid())
+  batchId        String
+  brandDna       Json
+  designSystem   Json
+  copy           Json
+  layout         Json
+  imageAsset     Json
+  renderedCanvas Json
+  rating         Int?
+
+  // Intelligence layer artefacts (Design Intelligence System). Nullable &
+  // non-breaking: populated only when Professional_Mode is active.
+  // `qualityReport` holds the Quality_Report (Req 4.4); `refinementRating` is a
+  // separate 1..10 channel from the existing `rating` (Req 8.x).
+  qualityReport    Json?
+  refinementRating Int?
+
+  batch GenerationBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  @@index([batchId])
+}
+
+// ---------------------------------------------------------------------------
+// Async job & status (Vercel serverless background execution)
+// ---------------------------------------------------------------------------
+
+/// A pipeline job created by POST /api/generate. Owned by a user for ownership
+/// authorization (only the owner may poll it).
+model Job {
+  id             String   @id @default(cuid())
+  userId         String
+  briefId        String
+  variationCount Int
+  reservationId  String?  @unique
+  createdAt      DateTime @default(now())
+
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reservation Reservation? @relation(fields: [reservationId], references: [id])
+  status      JobStatus?
+
+  // A finished job points at the produced batch (1:1, nullable until done).
+  resultBatchId String?          @unique
+  resultBatch   GenerationBatch? @relation(fields: [resultBatchId], references: [id])
+
+  @@index([userId])
+}
+
+/// Polled status of a job (Req 2.9, 2.10). `statuses` holds the per-step status
+/// map for steps 1..6; `currentStep` is the active step.
+model JobStatus {
+  jobId         String   @id
+  state         JobState @default(queued)
+  currentStep   Int      @default(1)
+  statuses      Json
+  resultBatchId String?
+  failedStep    Int?
+  message       String?
+  updatedAt     DateTime @updatedAt
+
+  job Job @relation(fields: [jobId], references: [id], onDelete: Cascade)
+}
+
+// ---------------------------------------------------------------------------
+// Design Intelligence System — learning memory
+// ---------------------------------------------------------------------------
+
+/// A learned Design_DNA entry keyed by aggregated context (industry, purpose,
+/// audience). Stores NO raw brief PII (Req 9.1, 9.5). `designDna` mirrors the
+/// in-memory `DesignDNA` model; `outcome` is "ACCEPTED" | "REJECTED". Retention
+/// is enforced via `createdAt` (365-day window, Req 9.7).
+model IntelligenceMemory {
+  id        String   @id @default(cuid())
+  userId    String
+  industry  String
+  purpose   String
+  audience  String
+  designDna Json
+  outcome   String
+  feedback  String?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Context-match retrieval per user (Req 9.2, 9.4).
+  @@index([userId, industry, purpose, audience])
+  // Per-user deletion (Req 9.6).
+  @@index([userId])
+  // Retention scan / cleanup of expired entries (Req 9.7).
+  @@index([createdAt])
+}

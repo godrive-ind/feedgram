@@ -1,0 +1,161 @@
+/**
+ * Server composition container (task 8.2 support).
+ *
+ * Provides a single, lazily-initialized {@link PipelineWorker} for the API
+ * route handlers (`POST /api/generate`, `GET /api/jobs/[jobId]`, ...). Keeping
+ * the wiring in one place means the HTTP layer stays thin and the worker stays
+ * mockable: tests call {@link setPipelineWorker} to inject an in-memory worker.
+ *
+ * Production wiring note:
+ *   The design targets a Prisma-backed worker (Postgres job/credit stores —
+ *   `PrismaJobStore` / `PrismaCreditRepository` in `lib/jobs/job-store.ts`).
+ *   Because the Prisma client is not generated/connected in this environment,
+ *   the DEFAULT worker here uses the established in-memory factory
+ *   ({@link createInMemoryPipelineWorker}) so the route runs and is testable.
+ *   Swapping to the Prisma-backed stores is a drop-in change inside
+ *   {@link createDefaultWorker} that does not touch the route handlers.
+ *
+ * The worker is a module-level singleton so that — within a single serverless
+ * instance — a job created by `POST /api/generate` and run via `waitUntil`
+ * remains pollable by `GET /api/jobs/[jobId]`.
+ */
+
+import {
+  createAIServiceConnectorFromEnv,
+  type AIServiceConnector,
+} from "@/lib/ai/connector";
+import {
+  createInMemoryPipelineWorker,
+  type BatchArtifacts,
+  type PipelineWorker,
+} from "@/lib/pipeline/worker";
+import { getBatchIntelligenceStore } from "@/lib/server/batch-intelligence-store";
+import { getHistoryManager } from "@/lib/server/history-provider";
+import { getVariationStore } from "@/lib/server/variation-store";
+import type { DesignBriefInput, GenerationBatch } from "@/lib/types";
+
+// ---------------------------------------------------------------------------
+// Singleton management
+// ---------------------------------------------------------------------------
+
+let workerSingleton: PipelineWorker | undefined;
+let connectorSingleton: AIServiceConnector | undefined;
+
+/**
+ * Resolve the AI connector. Defaults to the env-backed connector
+ * ({@link createAIServiceConnectorFromEnv}) whose vendor keys are read from
+ * server-side env vars; tests inject a mock connector via {@link setConnector}.
+ */
+function resolveConnector(): AIServiceConnector {
+  if (!connectorSingleton) {
+    connectorSingleton = createAIServiceConnectorFromEnv();
+  }
+  return connectorSingleton;
+}
+
+/**
+ * Read an optional non-negative integer of starting credits to seed for the
+ * in-memory MVP worker (e.g. local dev). Production reads balances from the DB,
+ * so this is only consulted by the in-memory default wiring.
+ */
+function devInitialCredits(): number {
+  const raw = process.env.DEV_INITIAL_CREDITS;
+  if (!raw) return 0;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
+/** Build the default (in-memory MVP) worker. See production-wiring note above. */
+function createDefaultWorker(): PipelineWorker {
+  const grant = devInitialCredits();
+  const { worker } = createInMemoryPipelineWorker({
+    connector: resolveConnector(),
+    // With no DB, optionally seed a dev credit balance via DEV_INITIAL_CREDITS.
+    // Empty by default so production-like behaviour (DB balances) is the norm.
+    initialCredits: grant > 0 ? { __dev__: grant } : undefined,
+    // On batch completion (state "done"), persist it to history (Req 7.1) and
+    // populate the variation store so export/publish/regenerate routes operate
+    // on the real variations (task 14.1). Failures here never fail the job
+    // (the worker swallows onBatch errors).
+    onBatch: persistCompletedBatch,
+  });
+  return worker;
+}
+
+/**
+ * Sink invoked by the worker when a batch completes successfully. Persists the
+ * batch + brief into the History_Manager (Req 7.1) and registers every
+ * variation (with its owning user) in the variation store so the
+ * export/publish/variations routes can resolve and authorize them, and records
+ * the batch-level Design_Intelligence artefacts
+ * (Brief_Analysis/Visual_Strategy/Quality_Reports) so
+ * `GET /api/batches/[id]/intelligence` can serve them to the owner (Req 4.4, 4.5).
+ *
+ * Resolved through the same injectable provider seams the routes use
+ * (`getHistoryManager` / `getVariationStore` / `getBatchIntelligenceStore`), so
+ * tests that inject their own managers see the worker's persisted batches and
+ * vice versa.
+ */
+async function persistCompletedBatch(
+  batch: GenerationBatch,
+  brief: DesignBriefInput,
+  artifacts?: BatchArtifacts,
+): Promise<void> {
+  // Persist to history (retries + session-retention handled inside saveBatch).
+  await getHistoryManager().saveBatch(batch, brief);
+
+  // Register each variation under the batch's owning user for the per-variation
+  // routes (export/publish/regenerate ownership checks).
+  const store = getVariationStore();
+  for (const variation of batch.variations) {
+    await store.saveVariation(variation, batch.userId);
+  }
+
+  // Record the batch-level Design_Intelligence artefacts so
+  // `GET /api/batches/[id]/intelligence` can serve them to the owner (Req 4.4,
+  // 4.5, 11.6). `artifacts` is present only for Professional_Mode batches; for
+  // the legacy/base path we still record the owner + professionalMode:false so
+  // the route can authorise ownership and return an explicit "no artefacts"
+  // payload rather than leaking batch existence.
+  await getBatchIntelligenceStore().saveBatchIntelligence({
+    batchId: batch.id,
+    ownerUserId: batch.userId,
+    professionalMode: artifacts !== undefined,
+    ...(artifacts?.briefAnalysis
+      ? { briefAnalysis: artifacts.briefAnalysis }
+      : {}),
+    ...(artifacts?.visualStrategy
+      ? { visualStrategy: artifacts.visualStrategy }
+      : {}),
+    ...(artifacts?.qualityReports
+      ? { qualityReports: artifacts.qualityReports }
+      : {}),
+  });
+}
+
+/**
+ * Return the process-wide {@link PipelineWorker}, creating the default in-memory
+ * worker on first use. Route handlers call this instead of constructing wiring.
+ */
+export function getPipelineWorker(): PipelineWorker {
+  if (!workerSingleton) {
+    workerSingleton = createDefaultWorker();
+  }
+  return workerSingleton;
+}
+
+/** Inject a specific worker (used by tests and alternative wirings). */
+export function setPipelineWorker(worker: PipelineWorker): void {
+  workerSingleton = worker;
+}
+
+/** Override the AI connector before the worker is first built (tests/wiring). */
+export function setConnector(connector: AIServiceConnector): void {
+  connectorSingleton = connector;
+}
+
+/** Reset the container (test helper) so the next access rebuilds defaults. */
+export function resetContainer(): void {
+  workerSingleton = undefined;
+  connectorSingleton = undefined;
+}

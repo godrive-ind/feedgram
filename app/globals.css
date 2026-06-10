@@ -1,0 +1,455 @@
+/* Minimal styling for the 3-panel scaffold (task 11.1). Intentionally simple. */
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  color: #1f2937;
+  background: #f3f4f6;
+}
+
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+.app-header {
+  padding: 0.5rem 1rem;
+  background: #111827;
+  color: #f9fafb;
+}
+
+.app-header h1 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.panels {
+  display: grid;
+  grid-template-columns: 320px 1fr 320px;
+  gap: 1px;
+  flex: 1;
+  min-height: 0;
+  background: #d1d5db;
+}
+
+.panel {
+  background: #ffffff;
+  padding: 1rem;
+  overflow-y: auto;
+}
+
+.panel h2 {
+  margin-top: 0;
+  font-size: 1rem;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin-bottom: 0.85rem;
+  border: none;
+  padding: 0;
+}
+
+.field label,
+.field legend {
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.field input[type="text"],
+.field textarea,
+.field select {
+  width: 100%;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  font: inherit;
+}
+
+.field input[aria-invalid="true"],
+.field textarea[aria-invalid="true"] {
+  border-color: #dc2626;
+}
+
+.field-error {
+  margin: 0;
+  color: #dc2626;
+  font-size: 0.8rem;
+}
+
+.checkbox-row,
+.radio-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-weight: 400;
+  font-size: 0.85rem;
+}
+
+.variation-options {
+  display: flex;
+  gap: 1rem;
+}
+
+.pro-badge {
+  display: inline-block;
+  margin-left: 0.25rem;
+  padding: 0 0.35rem;
+  border-radius: 999px;
+  background: #f59e0b;
+  color: #1f2937;
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.upload-feedback {
+  font-size: 0.8rem;
+}
+
+.upload-accepted {
+  color: #059669;
+  margin: 0.25rem 0;
+}
+
+.upload-rejected {
+  color: #dc2626;
+  margin: 0.25rem 0;
+  padding-left: 1rem;
+}
+
+button[type="submit"] {
+  padding: 0.5rem 1rem;
+  border: none;
+  border-radius: 4px;
+  background: #2563eb;
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+button[type="submit"]:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.submit-message {
+  font-size: 0.85rem;
+  color: #374151;
+}
+
+.empty-state {
+  color: #6b7280;
+  font-size: 0.9rem;
+  text-align: center;
+  margin-top: 2rem;
+}
+
+/* Center Panel — Canvas Output & Preview (task 11.2). */
+
+.canvas-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.canvas-toolbar h2 {
+  margin: 0;
+  flex: 1 1 100%;
+}
+
+.toolbar-group {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.toolbar-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #374151;
+  min-width: 2.5rem;
+  text-align: center;
+}
+
+.toolbar-btn {
+  min-width: 1.9rem;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  background: #f9fafb;
+  color: #1f2937;
+  font: inherit;
+  font-size: 0.8rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.toolbar-btn:hover {
+  background: #eef2ff;
+}
+
+.toolbar-btn.is-active {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #fff;
+}
+
+.variation-grid {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.variation-cell {
+  border: 2px solid transparent;
+  border-radius: 6px;
+  background: #f9fafb;
+  padding: 0.4rem;
+}
+
+.variation-cell.is-selected {
+  border-color: #2563eb;
+}
+
+.variation-preview {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+}
+
+.preview-viewport {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  overflow: hidden;
+  background: #e5e7eb;
+  border-radius: 4px;
+}
+
+.preview-viewport img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.preview-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  padding: 0.5rem;
+  text-align: center;
+  font-size: 0.8rem;
+  color: #6b7280;
+}
+
+.variation-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-top: 0.4rem;
+}
+
+.variation-actions button {
+  padding: 0.25rem 0.5rem;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  background: #fff;
+  color: #1f2937;
+  font: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.variation-actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.canvas-action-message {
+  margin-top: 0.75rem;
+  font-size: 0.85rem;
+  color: #374151;
+}
+
+/* Right panel — Properties / Prompt Chain / History / Credit (task 11.3). */
+
+.prop-section {
+  margin-bottom: 1.5rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.prop-section:last-child {
+  border-bottom: none;
+}
+
+.prop-section h2 {
+  margin: 0 0 0.5rem;
+  font-size: 0.95rem;
+}
+
+.prop-section h3 {
+  margin: 0.75rem 0 0.4rem;
+  font-size: 0.85rem;
+}
+
+.credit-balance {
+  margin: 0;
+  font-size: 0.9rem;
+  color: #374151;
+}
+
+.credit-value {
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: #2563eb;
+}
+
+.progress-summary {
+  margin: 0 0 0.5rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.progress-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.progress-step {
+  display: grid;
+  grid-template-columns: 1.4rem 1fr auto;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.5rem;
+  border-radius: 4px;
+  background: #f9fafb;
+  font-size: 0.8rem;
+}
+
+.progress-step .step-number {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.4rem;
+  height: 1.4rem;
+  border-radius: 999px;
+  background: #d1d5db;
+  color: #1f2937;
+  font-weight: 700;
+}
+
+.progress-step.status-done .step-number {
+  background: #059669;
+  color: #fff;
+}
+
+.progress-step.status-running .step-number {
+  background: #2563eb;
+  color: #fff;
+}
+
+.progress-step.status-failed .step-number {
+  background: #dc2626;
+  color: #fff;
+}
+
+.progress-step.is-active {
+  outline: 2px solid #2563eb;
+}
+
+.progress-step .step-status {
+  color: #6b7280;
+}
+
+.history-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.history-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.35rem 0.5rem;
+  border-radius: 4px;
+  background: #f9fafb;
+  font-size: 0.8rem;
+}
+
+.history-status {
+  font-weight: 600;
+}
+
+.history-status.status-failed,
+.history-status.status-inconsistent {
+  color: #dc2626;
+}
+
+.history-status.status-done {
+  color: #059669;
+}
+
+.history-note {
+  margin: 0.4rem 0 0;
+  font-size: 0.75rem;
+  color: #6b7280;
+}
+
+.rating-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.rating-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+}
+
+.rating-stars {
+  display: inline-flex;
+  gap: 0.1rem;
+}
+
+.rating-star {
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 1.1rem;
+  line-height: 1;
+  color: #d1d5db;
+  padding: 0;
+}
+
+.rating-star.is-selected {
+  color: #f59e0b;
+}
