@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { POST, setObjectStorage } from "@/app/api/uploads/route";
+import { POST } from "@/app/api/uploads/route";
+import { setObjectStorage } from "@/lib/server/object-storage-provider";
 import { USER_ID_HEADER } from "@/lib/auth";
 import {
   InMemoryObjectStorage,

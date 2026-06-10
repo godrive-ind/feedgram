@@ -27,30 +27,11 @@ import { NextResponse } from "next/server";
 
 import { getAuthenticatedUserId } from "@/lib/auth";
 import { validateUpload } from "@/lib/intake/upload-validation";
-import {
-  getObjectStorage,
-  type ObjectStorage,
-} from "@/lib/storage/object-storage";
+import { getUploadStorage } from "@/lib/server/object-storage-provider";
 import type { FileRef, UploadedFile } from "@/lib/types";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
-
-// ---------------------------------------------------------------------------
-// Injectable storage provider (mockable seam)
-// ---------------------------------------------------------------------------
-
-let storage: ObjectStorage | undefined;
-
-/** Resolve the object storage, defaulting to the shared adapter. */
-function getStorage(): ObjectStorage {
-  return storage ?? getObjectStorage();
-}
-
-/** Override the storage adapter (used by production wiring and tests). */
-export function setObjectStorage(adapter: ObjectStorage): void {
-  storage = adapter;
-}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -146,7 +127,7 @@ export async function POST(request: Request): Promise<NextResponse> {
   }
 
   // Upload accepted files to object storage.
-  const store = getStorage();
+  const store = getUploadStorage();
   const uploaded: (FileRef & {
     name: string;
     triggerBackgroundRemoval: boolean;

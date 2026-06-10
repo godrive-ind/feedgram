@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 
-import { GET, setCreditManager } from "@/app/api/credits/route";
+import { GET } from "@/app/api/credits/route";
+import { setCreditManager } from "@/lib/server/credit-provider";
 import { USER_ID_HEADER } from "@/lib/auth";
 import { createInMemoryCreditManager } from "@/lib/credit/credit-manager";
 

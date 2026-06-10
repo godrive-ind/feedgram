@@ -25,34 +25,12 @@
 import { NextResponse } from "next/server";
 
 import { getAuthenticatedUserId } from "@/lib/auth";
-import {
-  CreditManager,
-  createInMemoryCreditManager,
-} from "@/lib/credit/credit-manager";
+import { getCreditManager } from "@/lib/server/credit-provider";
 
 export const runtime = "nodejs";
 export const maxDuration = 15;
 // Balance changes as credits are reserved/committed/refunded; never cache.
 export const dynamic = "force-dynamic";
-
-// ---------------------------------------------------------------------------
-// Injectable credit-manager provider (mockable seam)
-// ---------------------------------------------------------------------------
-
-let creditManager: CreditManager | undefined;
-
-/** Resolve the credit manager, lazily building an in-memory default. */
-function getCreditManager(): CreditManager {
-  if (!creditManager) {
-    creditManager = createInMemoryCreditManager().manager;
-  }
-  return creditManager;
-}
-
-/** Override the credit manager (used by production wiring and tests). */
-export function setCreditManager(manager: CreditManager): void {
-  creditManager = manager;
-}
 
 // ---------------------------------------------------------------------------
 // Handler
