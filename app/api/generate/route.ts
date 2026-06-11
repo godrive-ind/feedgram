@@ -232,8 +232,18 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const status = await worker.getJobStatus(jobId, user.userId);
 
   if (status?.state === "done" && status.resultBatchId) {
+    // Load the batch from history (persisted by onBatch sink in the same invocation).
+    let batch: import("@/lib/types").GenerationBatch | undefined;
+    try {
+      const { getHistoryManager } = await import("@/lib/server/history-provider");
+      const record = await getHistoryManager().loadBatch(status.resultBatchId);
+      batch = record?.batch;
+    } catch {
+      // Non-fatal: batch not in history yet, but we still have the status.
+    }
+
     return NextResponse.json(
-      { jobId, resultBatchId: status.resultBatchId, status },
+      { jobId, resultBatchId: status.resultBatchId, status, batch: batch ?? null },
       { status: 200 },
     );
   }

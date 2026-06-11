@@ -114,10 +114,17 @@ export default function HomePage() {
     setBatch(null);
   }, []);
 
-  // Called when the synchronous generate endpoint returns a resultBatchId directly.
+  // Called when the synchronous generate endpoint returns a batch or resultBatchId directly.
   const handleGenerationComplete = useCallback(
-    async (resultBatchId: string) => {
+    async (batchOrId: GenerationBatch | string) => {
       setRefreshKey((k) => k + 1);
+      // If it's a full batch object, use it directly without fetching.
+      if (typeof batchOrId === "object" && batchOrId !== null && "id" in batchOrId) {
+        setBatch(batchOrId as GenerationBatch);
+        return;
+      }
+      // Fallback: if only a batchId string, try to fetch from history.
+      const resultBatchId = batchOrId as string;
       try {
         const res = await fetch(
           `/api/history?batchId=${encodeURIComponent(resultBatchId)}`,

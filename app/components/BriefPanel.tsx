@@ -56,8 +56,8 @@ export interface BriefPanelProps {
   plan?: Plan;
   /** Optional callback fired with the created jobId after a successful POST. */
   onJobCreated?: (jobId: string) => void;
-  /** Optional callback fired with the resultBatchId when generation completes synchronously. */
-  onGenerationComplete?: (resultBatchId: string) => void;
+  /** Optional callback fired with the batch object or resultBatchId when generation completes synchronously. */
+  onGenerationComplete?: (batchOrId: any) => void;
 }
 
 /** Find the error message for a given field, if any. */
@@ -137,10 +137,13 @@ export default function BriefPanel({
           jobId: string;
           resultBatchId?: string;
           status?: any;
+          batch?: any;
         };
         setSubmitMessage(`Generasi selesai (job ${data.jobId}).`);
         onJobCreated?.(data.jobId);
-        if (data.resultBatchId) {
+        if (data.batch) {
+          onGenerationComplete?.(data.batch);
+        } else if (data.resultBatchId) {
           onGenerationComplete?.(data.resultBatchId);
         }
       } else if (response.status === 202) {
