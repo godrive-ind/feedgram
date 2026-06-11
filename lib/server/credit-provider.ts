@@ -18,21 +18,61 @@ import {
   CreditManager,
   InMemoryCreditRepository,
   type CreditRepository,
+  type Reservation,
 } from "@/lib/credit/credit-manager";
+
+// ---------------------------------------------------------------------------
+// Unlimited Credit Repository — always reports infinite balance, never rejects
+// ---------------------------------------------------------------------------
+
+class UnlimitedCreditRepository implements CreditRepository {
+  private seq = 0;
+
+  async getBalance(_userId: string): Promise<number> {
+    return 999999;
+  }
+
+  async addCredits(_userId: string, _amount: number): Promise<void> {
+    // no-op — balance is always unlimited
+  }
+
+  async hold(userId: string, amount: number): Promise<Reservation | undefined> {
+    // Always succeed — unlimited credits
+    return {
+      id: `res_unlimited_${++this.seq}`,
+      userId,
+      amount: Math.max(1, Math.floor(amount)),
+      status: "held",
+    };
+  }
+
+  async commitReservation(_reservationId: string): Promise<void> {
+    // no-op
+  }
+
+  async commitPartialReservation(
+    _reservationId: string,
+    _commitAmount: number,
+  ): Promise<void> {
+    // no-op
+  }
+
+  async refundReservation(_reservationId: string): Promise<void> {
+    // no-op
+  }
+}
 
 let creditManager: CreditManager | undefined;
 let creditRepo: CreditRepository | undefined;
 
 /**
- * Resolve the credit manager, lazily building an in-memory default backed by a
- * shared {@link InMemoryCreditRepository}. The repository is retained so the
- * pipeline worker can be wired against the SAME balances via
- * {@link getCreditRepository} — making a granted balance visible to both the UI
- * (`GET /api/credits`) and the generate flow (credit reserve/commit/refund).
+ * Resolve the credit manager — uses UnlimitedCreditRepository so credits are
+ * effectively infinite. No generation will ever be rejected for insufficient
+ * balance.
  */
 export function getCreditManager(): CreditManager {
   if (!creditManager) {
-    creditRepo = new InMemoryCreditRepository();
+    creditRepo = new UnlimitedCreditRepository();
     creditManager = new CreditManager(creditRepo);
   }
   return creditManager;
