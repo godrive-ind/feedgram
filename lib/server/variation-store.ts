@@ -123,10 +123,11 @@ export class InMemoryVariationStore implements VariationStore {
 }
 
 // ---------------------------------------------------------------------------
-// Injectable provider (mockable seam)
+// Injectable provider (mockable seam — globalThis for HMR survival)
 // ---------------------------------------------------------------------------
 
-let variationStoreSingleton: VariationStore | undefined;
+const GLOBAL_KEY = "__fdg_variation_store__" as const;
+const globalStore = globalThis as unknown as { [GLOBAL_KEY]?: VariationStore };
 
 /**
  * Resolve the process-wide {@link VariationStore}, lazily building an empty
@@ -134,18 +135,18 @@ let variationStoreSingleton: VariationStore | undefined;
  * real store via {@link setVariationStore} without changing route handlers.
  */
 export function getVariationStore(): VariationStore {
-  if (!variationStoreSingleton) {
-    variationStoreSingleton = new InMemoryVariationStore();
+  if (!globalStore[GLOBAL_KEY]) {
+    globalStore[GLOBAL_KEY] = new InMemoryVariationStore();
   }
-  return variationStoreSingleton;
+  return globalStore[GLOBAL_KEY];
 }
 
 /** Inject a specific variation store (tests and alternative wirings). */
 export function setVariationStore(store: VariationStore): void {
-  variationStoreSingleton = store;
+  globalStore[GLOBAL_KEY] = store;
 }
 
 /** Reset the store seam (test helper) so the next access rebuilds the default. */
 export function resetVariationStore(): void {
-  variationStoreSingleton = undefined;
+  globalStore[GLOBAL_KEY] = undefined;
 }

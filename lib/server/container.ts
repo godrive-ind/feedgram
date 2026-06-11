@@ -36,11 +36,32 @@ import { getVariationStore } from "@/lib/server/variation-store";
 import type { DesignBriefInput, GenerationBatch } from "@/lib/types";
 
 // ---------------------------------------------------------------------------
-// Singleton management
+// Singleton management (globalThis to survive HMR / module re-evaluation)
 // ---------------------------------------------------------------------------
 
-let workerSingleton: PipelineWorker | undefined;
-let connectorSingleton: AIServiceConnector | undefined;
+// In Next.js dev mode, modules can be re-evaluated on hot reload. Using
+// globalThis ensures the same worker instance persists so a job created by
+// POST /api/generate is visible to GET /api/jobs/[jobId] across re-evaluations.
+const GLOBAL_KEY_WORKER = "__fdg_pipeline_worker__" as const;
+const GLOBAL_KEY_CONNECTOR = "__fdg_ai_connector__" as const;
+
+const globalStore = globalThis as unknown as {
+  [GLOBAL_KEY_WORKER]?: PipelineWorker;
+  [GLOBAL_KEY_CONNECTOR]?: AIServiceConnector;
+};
+
+function getWorkerSingleton(): PipelineWorker | undefined {
+  return globalStore[GLOBAL_KEY_WORKER];
+}
+function setWorkerSingleton(w: PipelineWorker | undefined) {
+  globalStore[GLOBAL_KEY_WORKER] = w;
+}
+function getConnectorSingleton(): AIServiceConnector | undefined {
+  return globalStore[GLOBAL_KEY_CONNECTOR];
+}
+function setConnectorSingleton(c: AIServiceConnector | undefined) {
+  globalStore[GLOBAL_KEY_CONNECTOR] = c;
+}
 
 /**
  * Resolve the AI connector. Defaults to the env-backed connector
@@ -48,10 +69,12 @@ let connectorSingleton: AIServiceConnector | undefined;
  * server-side env vars; tests inject a mock connector via {@link setConnector}.
  */
 function resolveConnector(): AIServiceConnector {
-  if (!connectorSingleton) {
-    connectorSingleton = createAIServiceConnectorFromEnv();
+  let connector = getConnectorSingleton();
+  if (!connector) {
+    connector = createAIServiceConnectorFromEnv();
+    setConnectorSingleton(connector);
   }
-  return connectorSingleton;
+  return connector;
 }
 
 /**
@@ -147,24 +170,26 @@ async function persistCompletedBatch(
  * worker on first use. Route handlers call this instead of constructing wiring.
  */
 export function getPipelineWorker(): PipelineWorker {
-  if (!workerSingleton) {
-    workerSingleton = createDefaultWorker();
+  let worker = getWorkerSingleton();
+  if (!worker) {
+    worker = createDefaultWorker();
+    setWorkerSingleton(worker);
   }
-  return workerSingleton;
+  return worker;
 }
 
 /** Inject a specific worker (used by tests and alternative wirings). */
 export function setPipelineWorker(worker: PipelineWorker): void {
-  workerSingleton = worker;
+  setWorkerSingleton(worker);
 }
 
 /** Override the AI connector before the worker is first built (tests/wiring). */
 export function setConnector(connector: AIServiceConnector): void {
-  connectorSingleton = connector;
+  setConnectorSingleton(connector);
 }
 
 /** Reset the container (test helper) so the next access rebuilds defaults. */
 export function resetContainer(): void {
-  workerSingleton = undefined;
-  connectorSingleton = undefined;
+  setWorkerSingleton(undefined);
+  setConnectorSingleton(undefined);
 }

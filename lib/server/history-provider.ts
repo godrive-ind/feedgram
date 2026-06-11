@@ -27,7 +27,8 @@ import {
   createInMemoryHistoryManager,
 } from "@/lib/history/history-manager";
 
-let historyManagerSingleton: HistoryManager | undefined;
+const GLOBAL_KEY = "__fdg_history_manager__" as const;
+const globalStore = globalThis as unknown as { [GLOBAL_KEY]?: HistoryManager };
 
 /**
  * Resolve the process-wide {@link HistoryManager}, lazily building an in-memory
@@ -35,18 +36,18 @@ let historyManagerSingleton: HistoryManager | undefined;
  * manager via {@link setHistoryManager} without changing route handlers.
  */
 export function getHistoryManager(): HistoryManager {
-  if (!historyManagerSingleton) {
-    historyManagerSingleton = createInMemoryHistoryManager().manager;
+  if (!globalStore[GLOBAL_KEY]) {
+    globalStore[GLOBAL_KEY] = createInMemoryHistoryManager().manager;
   }
-  return historyManagerSingleton;
+  return globalStore[GLOBAL_KEY];
 }
 
 /** Inject a specific history manager (tests and alternative wirings). */
 export function setHistoryManager(manager: HistoryManager): void {
-  historyManagerSingleton = manager;
+  globalStore[GLOBAL_KEY] = manager;
 }
 
 /** Reset the seam (test helper) so the next access rebuilds the default. */
 export function resetHistoryManager(): void {
-  historyManagerSingleton = undefined;
+  globalStore[GLOBAL_KEY] = undefined;
 }

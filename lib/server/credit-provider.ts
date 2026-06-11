@@ -62,8 +62,17 @@ class UnlimitedCreditRepository implements CreditRepository {
   }
 }
 
-let creditManager: CreditManager | undefined;
-let creditRepo: CreditRepository | undefined;
+// ---------------------------------------------------------------------------
+// Singleton management (globalThis to survive HMR / module re-evaluation)
+// ---------------------------------------------------------------------------
+
+const GLOBAL_KEY_CREDIT_MGR = "__fdg_credit_manager__" as const;
+const GLOBAL_KEY_CREDIT_REPO = "__fdg_credit_repo__" as const;
+
+const globalStore = globalThis as unknown as {
+  [GLOBAL_KEY_CREDIT_MGR]?: CreditManager;
+  [GLOBAL_KEY_CREDIT_REPO]?: CreditRepository;
+};
 
 /**
  * Resolve the credit manager — uses UnlimitedCreditRepository so credits are
@@ -71,11 +80,11 @@ let creditRepo: CreditRepository | undefined;
  * balance.
  */
 export function getCreditManager(): CreditManager {
-  if (!creditManager) {
-    creditRepo = new UnlimitedCreditRepository();
-    creditManager = new CreditManager(creditRepo);
+  if (!globalStore[GLOBAL_KEY_CREDIT_MGR]) {
+    globalStore[GLOBAL_KEY_CREDIT_REPO] = new UnlimitedCreditRepository();
+    globalStore[GLOBAL_KEY_CREDIT_MGR] = new CreditManager(globalStore[GLOBAL_KEY_CREDIT_REPO]);
   }
-  return creditManager;
+  return globalStore[GLOBAL_KEY_CREDIT_MGR];
 }
 
 /**
@@ -85,12 +94,12 @@ export function getCreditManager(): CreditManager {
  * credits route observe the same balances (single source of truth).
  */
 export function getCreditRepository(): CreditRepository {
-  if (!creditRepo) {
+  if (!globalStore[GLOBAL_KEY_CREDIT_REPO]) {
     // Building the manager populates the shared repo.
     getCreditManager();
   }
-  // `getCreditManager` guarantees `creditRepo` is set.
-  return creditRepo as CreditRepository;
+  // `getCreditManager` guarantees the repo is set.
+  return globalStore[GLOBAL_KEY_CREDIT_REPO] as CreditRepository;
 }
 
 /**
@@ -99,12 +108,12 @@ export function getCreditRepository(): CreditRepository {
  * is cleared; `getCreditRepository` will rebuild a default repo on demand.
  */
 export function setCreditManager(manager: CreditManager): void {
-  creditManager = manager;
-  creditRepo = undefined;
+  globalStore[GLOBAL_KEY_CREDIT_MGR] = manager;
+  globalStore[GLOBAL_KEY_CREDIT_REPO] = undefined;
 }
 
 /** Reset the seam (test helper) so the next access rebuilds the default. */
 export function resetCreditManager(): void {
-  creditManager = undefined;
-  creditRepo = undefined;
+  globalStore[GLOBAL_KEY_CREDIT_MGR] = undefined;
+  globalStore[GLOBAL_KEY_CREDIT_REPO] = undefined;
 }

@@ -151,10 +151,11 @@ export class InMemoryBatchIntelligenceStore implements BatchIntelligenceStore {
 }
 
 // ---------------------------------------------------------------------------
-// Injectable provider (mockable seam)
+// Injectable provider (mockable seam — globalThis for HMR survival)
 // ---------------------------------------------------------------------------
 
-let batchIntelligenceStoreSingleton: BatchIntelligenceStore | undefined;
+const GLOBAL_KEY = "__fdg_batch_intelligence_store__" as const;
+const globalStore = globalThis as unknown as { [GLOBAL_KEY]?: BatchIntelligenceStore };
 
 /**
  * Resolve the process-wide {@link BatchIntelligenceStore}, lazily building an
@@ -163,18 +164,18 @@ let batchIntelligenceStoreSingleton: BatchIntelligenceStore | undefined;
  * changing the route handler.
  */
 export function getBatchIntelligenceStore(): BatchIntelligenceStore {
-  if (!batchIntelligenceStoreSingleton) {
-    batchIntelligenceStoreSingleton = new InMemoryBatchIntelligenceStore();
+  if (!globalStore[GLOBAL_KEY]) {
+    globalStore[GLOBAL_KEY] = new InMemoryBatchIntelligenceStore();
   }
-  return batchIntelligenceStoreSingleton;
+  return globalStore[GLOBAL_KEY];
 }
 
 /** Inject a specific batch intelligence store (tests and alternative wirings). */
 export function setBatchIntelligenceStore(store: BatchIntelligenceStore): void {
-  batchIntelligenceStoreSingleton = store;
+  globalStore[GLOBAL_KEY] = store;
 }
 
 /** Reset the store seam (test helper) so the next access rebuilds the default. */
 export function resetBatchIntelligenceStore(): void {
-  batchIntelligenceStoreSingleton = undefined;
+  globalStore[GLOBAL_KEY] = undefined;
 }

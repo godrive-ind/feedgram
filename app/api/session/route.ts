@@ -114,7 +114,7 @@ export async function POST(request: Request): Promise<NextResponse> {
   const response = NextResponse.json({ userId, plan, balance }, { status: 200 });
   response.cookies.set(SESSION_COOKIE, token, {
     httpOnly: true,
-    secure: true,
+    secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
     path: "/",
     maxAge: SESSION_TTL_SECONDS,
