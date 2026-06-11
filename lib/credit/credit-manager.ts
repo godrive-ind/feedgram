@@ -67,6 +67,16 @@ export interface CreditRepository {
   getBalance(userId: string): Promise<number>;
 
   /**
+   * Add `amount` credits to `userId`'s available balance (granting/seeding).
+   *
+   * `amount` is normalized to a non-negative integer; a non-positive or
+   * non-finite amount is a no-op. The resulting balance always stays a
+   * non-negative integer (Req 8.6). Used to seed new users with a starting
+   * balance and to top-up credits.
+   */
+  addCredits(userId: string, amount: number): Promise<void>;
+
+  /**
    * Atomically check-and-hold `amount` credits for `userId`.
    *
    * If the available balance is `< amount`, leaves the balance unchanged and
@@ -137,6 +147,13 @@ export class InMemoryCreditRepository implements CreditRepository {
 
   async getBalance(userId: string): Promise<number> {
     return this.balances.get(userId) ?? 0;
+  }
+
+  async addCredits(userId: string, amount: number): Promise<void> {
+    const normalizedAmount = normalizeBalance(amount);
+    if (normalizedAmount <= 0) return; // no-op for non-positive/invalid grants
+    const current = this.balances.get(userId) ?? 0;
+    this.balances.set(userId, normalizeBalance(current + normalizedAmount));
   }
 
   async hold(userId: string, amount: number): Promise<Reservation | undefined> {
@@ -246,6 +263,16 @@ export class CreditManager {
   async getBalance(userId: string): Promise<number> {
     const balance = await this.repo.getBalance(userId);
     return normalizeBalance(balance);
+  }
+
+  /**
+   * Grant (add) `amount` credits to the user's available balance, e.g. seeding
+   * a new user's starting balance or topping-up. Delegates to
+   * {@link CreditRepository.addCredits}, which normalizes the amount to a
+   * non-negative integer and keeps the balance a non-negative integer (Req 8.6).
+   */
+  async grant(userId: string, amount: number): Promise<void> {
+    await this.repo.addCredits(userId, amount);
   }
 
   /**

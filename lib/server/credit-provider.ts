@@ -16,25 +16,55 @@
 
 import {
   CreditManager,
-  createInMemoryCreditManager,
+  InMemoryCreditRepository,
+  type CreditRepository,
 } from "@/lib/credit/credit-manager";
 
 let creditManager: CreditManager | undefined;
+let creditRepo: CreditRepository | undefined;
 
-/** Resolve the credit manager, lazily building an in-memory default. */
+/**
+ * Resolve the credit manager, lazily building an in-memory default backed by a
+ * shared {@link InMemoryCreditRepository}. The repository is retained so the
+ * pipeline worker can be wired against the SAME balances via
+ * {@link getCreditRepository} — making a granted balance visible to both the UI
+ * (`GET /api/credits`) and the generate flow (credit reserve/commit/refund).
+ */
 export function getCreditManager(): CreditManager {
   if (!creditManager) {
-    creditManager = createInMemoryCreditManager().manager;
+    creditRepo = new InMemoryCreditRepository();
+    creditManager = new CreditManager(creditRepo);
   }
   return creditManager;
 }
 
-/** Override the credit manager (used by production wiring and tests). */
+/**
+ * Resolve the shared {@link CreditRepository} underlying the credit manager,
+ * building the default in-memory manager on first use. `container.ts` passes
+ * this into `createInMemoryPipelineWorker({ creditRepo })` so the worker and the
+ * credits route observe the same balances (single source of truth).
+ */
+export function getCreditRepository(): CreditRepository {
+  if (!creditRepo) {
+    // Building the manager populates the shared repo.
+    getCreditManager();
+  }
+  // `getCreditManager` guarantees `creditRepo` is set.
+  return creditRepo as CreditRepository;
+}
+
+/**
+ * Override the credit manager (used by production wiring and tests). When a
+ * custom manager is injected the shared in-memory repo no longer applies, so it
+ * is cleared; `getCreditRepository` will rebuild a default repo on demand.
+ */
 export function setCreditManager(manager: CreditManager): void {
   creditManager = manager;
+  creditRepo = undefined;
 }
 
 /** Reset the seam (test helper) so the next access rebuilds the default. */
 export function resetCreditManager(): void {
   creditManager = undefined;
+  creditRepo = undefined;
 }

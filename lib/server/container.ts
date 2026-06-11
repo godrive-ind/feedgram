@@ -30,6 +30,7 @@ import {
   type PipelineWorker,
 } from "@/lib/pipeline/worker";
 import { getBatchIntelligenceStore } from "@/lib/server/batch-intelligence-store";
+import { getCreditRepository } from "@/lib/server/credit-provider";
 import { getHistoryManager } from "@/lib/server/history-provider";
 import { getVariationStore } from "@/lib/server/variation-store";
 import type { DesignBriefInput, GenerationBatch } from "@/lib/types";
@@ -68,11 +69,19 @@ function devInitialCredits(): number {
 /** Build the default (in-memory MVP) worker. See production-wiring note above. */
 function createDefaultWorker(): PipelineWorker {
   const grant = devInitialCredits();
+  // Share the SAME credit repository as the credits route (credit-provider) so
+  // a granted/seeded balance is visible to both the UI (`GET /api/credits`) and
+  // the generate flow (reserve/commit/refund). This makes the credit-provider
+  // the single source of truth for balances (no separate worker-owned manager).
+  const creditRepo = getCreditRepository();
+  // Seed an optional dev balance via DEV_INITIAL_CREDITS into the shared repo.
+  if (grant > 0) {
+    void creditRepo.addCredits("__dev__", grant);
+  }
   const { worker } = createInMemoryPipelineWorker({
     connector: resolveConnector(),
-    // With no DB, optionally seed a dev credit balance via DEV_INITIAL_CREDITS.
-    // Empty by default so production-like behaviour (DB balances) is the norm.
-    initialCredits: grant > 0 ? { __dev__: grant } : undefined,
+    // Reuse the shared repository so balances are unified across the app.
+    creditRepo,
     // On batch completion (state "done"), persist it to history (Req 7.1) and
     // populate the variation store so export/publish/regenerate routes operate
     // on the real variations (task 14.1). Failures here never fail the job

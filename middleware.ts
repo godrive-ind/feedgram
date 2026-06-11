@@ -33,11 +33,14 @@ import {
 } from "@/lib/auth";
 
 /**
- * Only run on API routes. All `/api/*` endpoints are protected; everything else
- * (static assets, pages) is untouched.
+ * Only run on API routes. All `/api/*` endpoints are protected EXCEPT
+ * `/api/session` (the login/session-issuing endpoint) — you cannot obtain a
+ * session if you must already be authenticated to reach it. The negative
+ * lookahead `(?!session)` excludes that single path while still gating every
+ * other `/api/*` endpoint. Everything else (static assets, pages) is untouched.
  */
 export const config = {
-  matcher: ["/api/:path*"],
+  matcher: ["/api/((?!session).*)"],
 };
 
 function unauthorized(message: string): NextResponse {

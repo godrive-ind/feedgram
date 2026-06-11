@@ -49,6 +49,11 @@ export default function HomePage() {
   // Bumped after a job completes so the credit balance / history re-read.
   const [refreshKey, setRefreshKey] = useState(0);
 
+  // Whether the MVP session cookie has been established. The panels only load
+  // their data (history/credits) once a session exists, otherwise the gated
+  // `/api/*` calls would 401 on first paint.
+  const [sessionReady, setSessionReady] = useState(false);
+
   // Load the history list (newest-first, ≤20) for the right panel.
   const loadHistory = useCallback(async () => {
     try {
@@ -73,10 +78,35 @@ export default function HomePage() {
     }
   }, []);
 
+  // Establish the MVP session once on mount. POST /api/session is the only
+  // endpoint excluded from the auth middleware; it sets the `fdg_session`
+  // cookie (and seeds a starting credit balance for a new user) so the
+  // subsequent gated `/api/*` reads succeed instead of returning 401.
   useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        await fetch("/api/session", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+        });
+      } catch {
+        // Non-fatal: the panels will simply show empty/zeroed state.
+      } finally {
+        if (!cancelled) setSessionReady(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!sessionReady) return;
     void loadHistory();
     void loadCredits();
-  }, [loadHistory, loadCredits, refreshKey]);
+  }, [sessionReady, loadHistory, loadCredits, refreshKey]);
 
   // A fresh generation clears the previously-shown batch until it completes.
   const handleJobCreated = useCallback((jobId: string) => {

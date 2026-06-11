@@ -404,6 +404,38 @@ export class PrismaCreditRepository implements CreditRepository {
   }
 
   /**
+   * Atomically add `amount` credits to the user's available balance (granting /
+   * seeding). Upserts the `Credit` row inside a transaction so a first-time
+   * grant creates the row and a subsequent grant increments it, keeping the
+   * balance a non-negative integer (Req 8.6). A non-positive/non-finite amount
+   * is a no-op.
+   */
+  async addCredits(userId: string, amount: number): Promise<void> {
+    const normalizedAmount = normalize(amount);
+    if (normalizedAmount <= 0) return; // no-op for non-positive/invalid grants
+
+    await this.db.$transaction(async (tx) => {
+      const credit = await tx.credit.findUnique({ where: { userId } });
+      const available = normalize(credit?.balance ?? 0);
+      const next = normalize(available + normalizedAmount);
+      if (tx.credit.upsert) {
+        await tx.credit.upsert({
+          where: { userId },
+          create: { userId, balance: next },
+          update: { balance: next },
+        });
+      } else if (credit) {
+        await tx.credit.update({
+          where: { userId },
+          data: { balance: next },
+        });
+      } else {
+        await tx.credit.create({ data: { userId, balance: next } });
+      }
+    });
+  }
+
+  /**
    * Atomically check-and-hold `amount` credits. Inside one transaction it reads
    * the current balance, rejects (returns `undefined`) if insufficient, then
    * decrements the available balance and creates a "held" reservation. Because
