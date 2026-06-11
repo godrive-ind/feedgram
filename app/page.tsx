@@ -114,6 +114,24 @@ export default function HomePage() {
     setBatch(null);
   }, []);
 
+  // Called when the synchronous generate endpoint returns a resultBatchId directly.
+  const handleGenerationComplete = useCallback(
+    async (resultBatchId: string) => {
+      setRefreshKey((k) => k + 1);
+      try {
+        const res = await fetch(
+          `/api/history?batchId=${encodeURIComponent(resultBatchId)}`,
+        );
+        if (!res.ok) return;
+        const data = (await res.json()) as { batch?: GenerationBatch };
+        if (data.batch) setBatch(data.batch);
+      } catch {
+        // Non-fatal: the canvas keeps its empty state.
+      }
+    },
+    [],
+  );
+
   // When the polled job reaches a terminal state, load the produced batch and
   // refresh the history + credit balance.
   const handleJobComplete = useCallback(
@@ -156,7 +174,11 @@ export default function HomePage() {
         <h1>Feed Design Generator</h1>
       </header>
       <div className="panels">
-        <BriefPanel plan={plan} onJobCreated={handleJobCreated} />
+        <BriefPanel
+          plan={plan}
+          onJobCreated={handleJobCreated}
+          onGenerationComplete={handleGenerationComplete}
+        />
         <CanvasPanel batch={batch} />
         <PropertiesPanel
           jobId={activeJobId}

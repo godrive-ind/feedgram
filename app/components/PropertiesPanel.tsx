@@ -230,6 +230,13 @@ function PromptChainSection({
     try {
       const res = await fetch(`/api/jobs/${id}`);
       if (!res.ok) {
+        // On serverless (Vercel), the job may have been completed synchronously
+        // in the same generate request. A 404 here means the in-memory store
+        // does not have the job (different instance). Silently ignore it.
+        if (res.status === 404) {
+          setError(null);
+          return;
+        }
         setError(`Gagal memuat status job (status ${res.status}).`);
         return;
       }

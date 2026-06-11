@@ -29,7 +29,6 @@ import { isVariationCount } from "@/lib/credit/credit-manager";
 import { PLAN_VARIATION_RULES } from "@/lib/credit/credit-manager";
 import { InsufficientCreditError } from "@/lib/pipeline/worker";
 import { getPipelineWorker } from "@/lib/server/container";
-import { runInBackground } from "@/lib/server/background";
 import type {
   DesignBriefInput,
   Plan,
@@ -220,9 +219,33 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     );
   }
 
-  // 5. Kick off the pipeline in the background and reply 202 immediately.
-  //    The pipeline must NOT block this response (design: waitUntil/fluid compute).
-  runInBackground(() => worker.runJob(jobId));
+  // 5. Run the pipeline SYNCHRONOUSLY and return the result directly.
+  //    This avoids the in-memory job polling problem on serverless (Vercel)
+  //    where GET /api/jobs/[jobId] may hit a different instance.
+  try {
+    await worker.runJob(jobId);
+  } catch (error) {
+    console.error("[generate] pipeline error:", error);
+  }
 
-  return NextResponse.json({ jobId }, { status: 202 });
+  // Read the final job status to determine the outcome.
+  const status = await worker.getJobStatus(jobId, user.userId);
+
+  if (status?.state === "done" && status.resultBatchId) {
+    return NextResponse.json(
+      { jobId, resultBatchId: status.resultBatchId, status },
+      { status: 200 },
+    );
+  }
+
+  // Pipeline failed — return the failure info.
+  return NextResponse.json(
+    {
+      jobId,
+      status,
+      error: "generation_failed",
+      message: status?.message ?? "Pipeline generasi gagal.",
+    },
+    { status: 500 },
+  );
 }

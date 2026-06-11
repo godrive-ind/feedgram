@@ -56,6 +56,8 @@ export interface BriefPanelProps {
   plan?: Plan;
   /** Optional callback fired with the created jobId after a successful POST. */
   onJobCreated?: (jobId: string) => void;
+  /** Optional callback fired with the resultBatchId when generation completes synchronously. */
+  onGenerationComplete?: (resultBatchId: string) => void;
 }
 
 /** Find the error message for a given field, if any. */
@@ -66,6 +68,7 @@ function errorFor(errors: FieldError[], field: string): string | undefined {
 export default function BriefPanel({
   plan = "Free",
   onJobCreated,
+  onGenerationComplete,
 }: BriefPanelProps) {
   const [form, setForm] = useState<BriefFormState>(createEmptyBriefFormState);
   const [errors, setErrors] = useState<FieldError[]>([]);
@@ -128,7 +131,20 @@ export default function BriefPanel({
         body: JSON.stringify(brief),
       });
 
-      if (response.status === 202) {
+      if (response.status === 200) {
+        // Synchronous pipeline: result returned directly.
+        const data = (await response.json()) as {
+          jobId: string;
+          resultBatchId?: string;
+          status?: any;
+        };
+        setSubmitMessage(`Generasi selesai (job ${data.jobId}).`);
+        onJobCreated?.(data.jobId);
+        if (data.resultBatchId) {
+          onGenerationComplete?.(data.resultBatchId);
+        }
+      } else if (response.status === 202) {
+        // Legacy async mode (if ever used).
         const data = (await response.json()) as { jobId: string };
         setSubmitMessage(`Generasi dimulai (job ${data.jobId}).`);
         onJobCreated?.(data.jobId);
